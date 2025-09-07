@@ -29,15 +29,18 @@ private:
 	uint32_t& pc = registers[15]; // Program Counter (R15)
 
 	PSR cpsr;
+	bool halted;
 
 public:
 	Cpu(BusType& bus);
 	void dumpregs();
 	void step();
+	bool is_halted();
 
 private:
-	void data_processing_immediate(uint32_t instruction);
+	void data_processing(uint32_t instruction);
 	void load_store_immediate(uint32_t instruction);
+	void swi_and_coprocessor(uint32_t instruction);
 	void addressing_mode_2(uint32_t instruction);
 	bool check_condition(uint32_t cond);
 };

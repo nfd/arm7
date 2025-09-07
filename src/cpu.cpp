@@ -10,7 +10,7 @@ static void undefined(uint32_t instruction, const char* reason) {
 }
 
 template<typename BusType>
-Cpu<BusType>::Cpu(BusType& bus) : bus(bus) {
+Cpu<BusType>::Cpu(BusType& bus) : bus(bus), halted(false) {
 	std::fill_n(registers, 16, 0);
 }
 
@@ -48,11 +48,14 @@ void Cpu<BusType>::step() {
 
 	switch((instruction & 0x0E000000) >> 25) {
 		case 0b000:
-			undefined(instruction, "Data Processing, misc, multiplies");
-			break;
 		case 0b001:
-			/* Data Processing & Miscellaneous Instructions */
-			data_processing_immediate(instruction);
+			if((instruction & 0x0FFFFFF0) == 0x012FFF10) {
+				// BX instruction
+				uint32_t rm = instruction & 0xF;
+				pc = registers[rm];
+			} else {
+				data_processing(instruction);
+			}
 			break;
 		case 0b010:
 			load_store_immediate(instruction);
@@ -72,6 +75,10 @@ void Cpu<BusType>::step() {
 					offset |= 0xFF000000; // Sign-extend negative offset
 				}
 				offset <<= 2; // Left shift by 2 to get byte offset
+				// If link bit is set, store return address in LR (R14)
+				if(instruction & 0x01000000) {
+					registers[14] = pc; // LR = address of next instruction
+				}
 				pc += offset + 4; // +4 for the pipeline effect
 			}
 			break;
@@ -80,7 +87,7 @@ void Cpu<BusType>::step() {
 			undefined(instruction, "Coprocessor Load/Store and Double Register Transfers");
 			break;
 		case 0b111:
-			undefined(instruction, "Software Interrupt and Coprocessor Instructions");
+			swi_and_coprocessor(instruction);
 			break;
 		default:
 			undefined(instruction, "Unknown instruction category");
@@ -88,47 +95,72 @@ void Cpu<BusType>::step() {
 }
 
 template<typename BusType>
-void Cpu<BusType>::data_processing_immediate(uint32_t instruction) {
+bool Cpu<BusType>::is_halted() {
+	return halted;
+}
+
+template<typename BusType>
+void Cpu<BusType>::data_processing(uint32_t instruction) {
 	uint32_t opcode = (instruction >> 21) & 0xF;
 	bool immediate = (instruction >> 25) & 1;
-	if(!immediate) {
-		undefined(instruction, "Data processing non-immediate?");
+
+	uint32_t shifter_operand = instruction & 0xFFF;
+	uint32_t rotate_imm = (shifter_operand >> 8) & 0xF;
+	uint32_t imm8 = shifter_operand & 0xFF;
+	uint32_t value;
+
+	if(immediate) {
+		value = (imm8 >> (rotate_imm * 2)) | (imm8 << (32 - (rotate_imm * 2)));
+	} else {
+		uint32_t rm = instruction & 0xF;
+		value = registers[rm];
 	}
 
 	bool set_flags = (instruction >> 20) & 1;
-	// uint32_t rn = (instruction >> 16) & 0xF;
 	uint32_t rd = (instruction >> 12) & 0xF;
-	uint32_t shifter_operand = instruction & 0xFFF;
+	uint32_t rn = (instruction >> 16) & 0xF;
+	uint32_t result;
 
 	switch(opcode) {
 		case 0b0010: { // SUB
-			uint32_t rotate_imm = (shifter_operand >> 8) & 0xF;
-			uint32_t imm8 = shifter_operand & 0xFF;
-			uint32_t value = (imm8 >> (rotate_imm * 2)) | (imm8 << (32 - (rotate_imm * 2)));
-			uint32_t result = registers[rd] - value;
+			result = registers[rd] - value;
 			registers[rd] = result;
-			if(set_flags) {
-				cpsr.N = (result >> 31) & 1;
-				cpsr.Z = (result == 0) ? 1 : 0;
-				cpsr.C = (registers[rd] >= value) ? 1 : 0; // No borrow
-				cpsr.V = ((registers[rd] ^ value) & (registers[rd] ^ result) >> 31) & 1;
-			}
+			break;
+		}
+		case 0b1010: { // CMP
+			result = registers[rn] - value;
 			break;
 		}
 		case 0b1101: { // MOV
-			uint32_t rotate_imm = (shifter_operand >> 8) & 0xF;
-			uint32_t imm8 = shifter_operand & 0xFF;
-			uint32_t value = (imm8 >> (rotate_imm * 2)) | (imm8 << (32 - (rotate_imm * 2)));
-			registers[rd] = value;
-			if(set_flags) {
-				cpsr.N = (value >> 31) & 1;
-				cpsr.Z = (value == 0) ? 1 : 0;
-			}
+			result = registers[rd] = value;
 			break;
 		}
 		default:
 			std::cout << "Data processing opcode not implemented: " << std::hex << opcode << std::dec << "\n";
 			undefined(instruction, "Data processing opcode not implemented");
+	}
+
+	if(set_flags) {
+		cpsr.N = (result >> 31) & 1;
+		cpsr.Z = (result == 0) ? 1 : 0;
+		cpsr.C = (registers[rd] >= value) ? 1 : 0; // No borrow
+		cpsr.V = ((registers[rd] ^ value) & (registers[rd] ^ result) >> 31) & 1;
+	}
+}
+
+template<typename BusType>
+void Cpu<BusType>::swi_and_coprocessor(uint32_t instruction) {
+	if((instruction & 0x0F000000) == 0x0F000000) {
+		// SWI
+		uint32_t comment = instruction & 0x00FFFFFF;
+		if(comment == 0x11) {
+			std::cout << "SWI Exit called\n";
+			halted = true;
+		} else {
+			undefined(instruction, "Unknown SWI");
+		}
+	} else {
+		undefined(instruction, "Coprocessor instruction");
 	}
 }
 

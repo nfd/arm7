@@ -12,7 +12,7 @@ int main(int argc, char* argv[]) {
 
 	system.ram.load_from_file(executable_filename, 0x0);
 
-	for(int i = 0; i < 100; i++) {
+	while(!system.cpu.is_halted()) {
 		system.cpu.step();
 		system.cpu.dumpregs();
 	}
