@@ -1,4 +1,3 @@
-#include <CLI/CLI.hpp>
 
 #include "bus.hpp"
 #include "ram.hpp"
@@ -6,12 +5,13 @@
 #include "debugout.hpp"
 
 int main(int argc, char* argv[]) {
-	CLI::App app{"Arm7 Emulator?"};
+	if(argc < 2) {
+		std::cerr << "Usage: " << argv[0] << " <executable>\n";
+		return 1;
+	}
 
-	std::string executable_filename;
-	app.add_option("executable", executable_filename, "Path to the program to run")->required()->check(CLI::ExistingFile);
+	std::string executable_filename = argv[1];
 
-	CLI11_PARSE(app, argc, argv);
 
 	Ram<0x0, 64 * 1024> ram1; // 64KB RAM at 0x00000000
 	DebugOut<0x10000> debugOut; // Debug output at 0x00010000
